@@ -1,8 +1,10 @@
+mod answer;
 mod header;
 mod question;
 
 use std::net::UdpSocket;
 
+use answer::Answer;
 use header::Header;
 use question::Question;
 
@@ -23,7 +25,6 @@ fn main() {
                     continue;
                 }
 
-
                 let mut received_question = Question::default();
                 received_question.labels = vec!["codecrafters".to_string(), "io".to_string()];
                 received_question.q_type = 1;
@@ -31,10 +32,18 @@ fn main() {
 
                 let mut response_header = Header::default();
                 response_header.ID = received_header.ID;
-                response_header.QR = 1; 
-                response_header.QDCOUNT = received_header.QDCOUNT;
-                response_header.ANCOUNT = 1; 
-                response_header.RCODE = 0; 
+                response_header.QR = 1;
+                response_header.QDCOUNT = 1;
+                response_header.ANCOUNT = 1;
+                response_header.RCODE = 0;
+
+                let mut response_answer = Answer::default();
+                response_answer.Name = vec!["codecrafters".to_string(), "io".to_string()];
+                response_answer.q_type = 1;
+                response_answer.q_class = 1;
+                response_answer.TTL = 60;
+                response_answer.Length = 4;
+                response_answer.Data = vec![8; response_answer.Length as usize];
 
                 let response_question = Question {
                     labels: received_question.labels.clone(),
@@ -48,10 +57,14 @@ fn main() {
                 let question_bytes = response_question
                     .create_question_as_array_of_bytes()
                     .expect("Failed to serialize question");
+                let answer_bytes = response_answer
+                    .create_answer_as_array_of_bytes()
+                    .expect("Failed to serialize answer");
 
                 let mut combined = Vec::new();
                 combined.extend_from_slice(&header_bytes);
                 combined.extend_from_slice(&question_bytes);
+                combined.extend_from_slice(&answer_bytes);
 
                 udp_socket
                     .send_to(&combined, source)
