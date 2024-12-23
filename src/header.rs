@@ -55,7 +55,6 @@ impl Header {
         bytes[1] = self.ID.to_be_bytes()[1];
 
         let temp = (self.QR << 7) | (self.OPCODE << 3) | (self.AA << 2) | (self.TC << 1) | self.RD;
-
         let temp2 = (self.RA << 7) | (self.Z << 4) | self.RCODE;
 
         bytes[2] = temp;
@@ -93,21 +92,7 @@ mod tests {
     #[test]
     fn test_parse_header_invalid_size() {
         let bytes: [u8; 10] = [0x12, 0x34, 0x85, 0x80, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00];
-        let mut header = Header {
-            ID: 0,
-            QR: 0,
-            OPCODE: 0,
-            AA: 0,
-            TC: 0,
-            RD: 0,
-            RA: 0,
-            Z: 0,
-            RCODE: 0,
-            QDCOUNT: 0,
-            ANCOUNT: 0,
-            NSCOUNT: 0,
-            ARCOUNT: 0,
-        };
+        let mut header = Header::default();
 
         assert!(header.parse_header(&bytes).is_err());
     }
