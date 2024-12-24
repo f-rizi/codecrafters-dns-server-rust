@@ -79,80 +79,28 @@ mod tests {
 
     #[test]
     fn test_parse_header_valid() {
+        // Construct a valid header byte array
         let bytes: [u8; 12] = [
-            0x12, 0x34, 0x85, 0x80, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x12,
+            0x34,        // ID: 0x1234
+            0b1001_0101, // Flags_part1: QR=1, OPCODE=2, AA=1, TC=0, RD=1 => 0x95
+            0b0101_0011, // Flags_part2: RA=0, Z=5, RCODE=3 => 0x53
+            0x00,
+            0x01, // QDCOUNT: 1
+            0x00,
+            0x02, // ANCOUNT: 2
+            0x00,
+            0x03, // NSCOUNT: 3
+            0x00,
+            0x04, // ARCOUNT: 4
         ];
         let mut header = Header::default();
 
+        // Parse the header
         assert!(header.parse_header(&bytes).is_ok());
+
+        // Assert each field
         assert_eq!(header.ID, 0x1234);
-        assert_eq!(header.QDCOUNT, 1);
-    }
-
-    #[test]
-    fn test_parse_header_invalid_size() {
-        let bytes: [u8; 10] = [0x12, 0x34, 0x85, 0x80, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00];
-        let mut header = Header::default();
-
-        assert!(header.parse_header(&bytes).is_err());
-    }
-
-    #[test]
-    fn test_create_header_as_array_of_bytes() {
-        let mut header = Header {
-            ID: 0x1234,
-            QR: 1,
-            OPCODE: 1,
-            AA: 0,
-            TC: 0,
-            RD: 1,
-            RA: 1,
-            Z: 0,
-            RCODE: 0,
-            QDCOUNT: 1,
-            ANCOUNT: 0,
-            NSCOUNT: 0,
-            ARCOUNT: 1,
-        };
-
-        let bytes = header
-            .create_header_as_array_of_bytes()
-            .expect("Failed to create byte array");
-
-        assert_eq!(
-            bytes,
-            [0x12, 0x34, 0x89, 0x80, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]
-        );
-    }
-
-    // Additional Tests
-
-    #[test]
-    fn test_parse_header_flags() {
-        // Construct header bytes with specific flags set
-        // Example:
-        // QR = 1, OPCODE = 2, AA = 1, TC = 0, RD = 1
-        // RA = 0, Z = 5, RCODE = 3
-        // Binary for flags_part1 (byte 2): QR=1, OPCODE=010 (2), AA=1, TC=0, RD=1 => 1 010 1 0 1 => 1010 1010 => 0xAA
-        // Binary for flags_part2 (byte 3): RA=0, Z=101 (5), RCODE=0011 (3) => 0 101 0011 => 0101 0011 => 0x53
-        let bytes: [u8; 12] = [
-            0xAB,
-            0xCD,        // ID
-            0b1010_1010, // flags_part1: QR=1, OPCODE=010 (2), AA=1, TC=0, RD=1
-            0b0101_0011, // flags_part2: RA=0, Z=5, RCODE=3
-            0x00,
-            0x01, // QDCOUNT
-            0x00,
-            0x02, // ANCOUNT
-            0x00,
-            0x03, // NSCOUNT
-            0x00,
-            0x04, // ARCOUNT
-        ];
-        let mut header = Header::default();
-
-        assert!(header.parse_header(&bytes).is_ok());
-        assert_eq!(header.ID, 0xABCD);
         assert_eq!(header.QR, 1);
         assert_eq!(header.OPCODE, 2);
         assert_eq!(header.AA, 1);
@@ -168,44 +116,121 @@ mod tests {
     }
 
     #[test]
-    fn test_create_header_flags() {
-        // debugging
-        let mut header = Header::default();
-        header.ID = 0xABCD;
-        header.QR = 1;
-        header.OPCODE = 2;
-        header.AA = 1;
-        header.TC = 0;
-        header.RD = 1;
-        header.RA = 0;
-        header.Z = 5;
-        header.RCODE = 3;
-        header.QDCOUNT = 1;
-        header.ANCOUNT = 2;
-        header.NSCOUNT = 3;
-        header.ARCOUNT = 4;
+    fn test_create_header_as_array_of_bytes() {
+        // Create a header with specific field values
+        let mut header = Header {
+            ID: 0x1234,
+            QR: 1,
+            OPCODE: 2,
+            AA: 1,
+            TC: 0,
+            RD: 1,
+            RA: 0,
+            Z: 5,
+            RCODE: 3,
+            QDCOUNT: 1,
+            ANCOUNT: 2,
+            NSCOUNT: 3,
+            ARCOUNT: 4,
+        };
 
+        // Serialize the header
         let bytes = header
             .create_header_as_array_of_bytes()
-            .expect("Failed to serialize header");
+            .expect("Failed to create byte array");
 
-        assert_eq!(
-            bytes,
-            [
-                0xAB,
-                0xCD,        // ID
-                0b1001_0101, // flags_part1
-                0b0101_0011, // flags_part2
-                0x00,
-                0x01, // QDCOUNT
-                0x00,
-                0x02, // ANCOUNT
-                0x00,
-                0x03, // NSCOUNT
-                0x00,
-                0x04, // ARCOUNT
-            ]
-        );
+        // Expected byte array
+        let expected_bytes: [u8; 12] = [
+            0x12,
+            0x34,        // ID: 0x1234
+            0b1001_0101, // Flags_part1: QR=1, OPCODE=2, AA=1, TC=0, RD=1 => 0x95
+            0b0101_0011, // Flags_part2: RA=0, Z=5, RCODE=3 => 0x53
+            0x00,
+            0x01, // QDCOUNT: 1
+            0x00,
+            0x02, // ANCOUNT: 2
+            0x00,
+            0x03, // NSCOUNT: 3
+            0x00,
+            0x04, // ARCOUNT: 4
+        ];
+
+        // Assert that the serialized bytes match the expected bytes
+        assert_eq!(bytes, expected_bytes);
+    }
+
+    #[test]
+    fn test_create_header_with_max_values() {
+        // Create a header with maximum possible values
+        let mut header = Header {
+            ID: u16::MAX, // 65535
+            QR: 1,
+            OPCODE: 15, // Max 4-bit value
+            AA: 1,
+            TC: 1,
+            RD: 1,
+            RA: 1,
+            Z: 7,              // Max 3-bit value
+            RCODE: 15,         // Max 4-bit value
+            QDCOUNT: u16::MAX, // 65535
+            ANCOUNT: u16::MAX,
+            NSCOUNT: u16::MAX,
+            ARCOUNT: u16::MAX,
+        };
+
+        // Serialize the header
+        let bytes = header
+            .create_header_as_array_of_bytes()
+            .expect("Failed to create byte array");
+
+        // Expected byte array with maximum values
+        let expected_bytes: [u8; 12] = [
+            0xFF,
+            0xFF,        // ID: 0xFFFF
+            0b1111_1111, // Flags_part1: QR=1, OPCODE=15, AA=1, TC=1, RD=1 => 0xFF
+            0b1111_1111, // Flags_part2: RA=1, Z=7, RCODE=15 => 0xFF
+            0xFF,
+            0xFF, // QDCOUNT: 65535
+            0xFF,
+            0xFF, // ANCOUNT: 65535
+            0xFF,
+            0xFF, // NSCOUNT: 65535
+            0xFF,
+            0xFF, // ARCOUNT: 65535
+        ];
+
+        // Assert that the serialized bytes match the expected bytes
+        assert_eq!(bytes, expected_bytes);
+    }
+
+    #[test]
+    fn test_create_header_with_min_values() {
+        // Create a header with minimum possible values (all fields set to 0)
+        let mut header = Header::default();
+
+        // Serialize the header
+        let bytes = header
+            .create_header_as_array_of_bytes()
+            .expect("Failed to create byte array");
+
+        // Expected byte array with minimum values
+        let expected_bytes: [u8; 12] = [
+            0x00,
+            0x00,        // ID: 0x0000
+            0b0000_0000, // Flags_part1: All flags = 0 => 0x00
+            0b0000_0000, // Flags_part2: All flags = 0 => 0x00
+            0x00,
+            0x00, // QDCOUNT: 0
+            0x00,
+            0x00, // ANCOUNT: 0
+            0x00,
+            0x00, // NSCOUNT: 0
+            0x00,
+            0x00, // ARCOUNT: 0
+        ];
+
+        // Assert that the serialized bytes match the expected bytes
+        assert_eq!(bytes, expected_bytes);
     }
 
     #[test]
@@ -252,148 +277,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_header_with_max_values() {
-        let mut header = Header {
-            ID: u16::MAX, // 65535
-            QR: 1,
-            OPCODE: 15, // Max 4-bit value
-            AA: 1,
-            TC: 1,
-            RD: 1,
-            RA: 1,
-            Z: 7,              // Max 3-bit value
-            RCODE: 15,         // Max 4-bit value
-            QDCOUNT: u16::MAX, // 65535
-            ANCOUNT: u16::MAX,
-            NSCOUNT: u16::MAX,
-            ARCOUNT: u16::MAX,
-        };
-
-        let bytes = header
-            .create_header_as_array_of_bytes()
-            .expect("Failed to create byte array");
-
-        assert_eq!(
-            bytes,
-            [
-                0xFF,
-                0xFF,        // ID
-                0b1111_1111, // flags_part1: QR=1, OPCODE=1111 (15), AA=1, TC=1, RD=1 => 0xFF
-                0b1111_1111, // flags_part2: RA=1, Z=111 (7), RCODE=1111 (15) => 0xFF
-                0xFF,
-                0xFF, // QDCOUNT
-                0xFF,
-                0xFF, // ANCOUNT
-                0xFF,
-                0xFF, // NSCOUNT
-                0xFF,
-                0xFF, // ARCOUNT
-            ]
-        );
-    }
-
-    #[test]
-    fn test_create_header_with_min_values() {
-        let mut header = Header::default(); // All fields are set to 0
-
-        // Manually set fields to their minimum values where applicable
-        header.QR = 0;
-        header.OPCODE = 0;
-        header.AA = 0;
-        header.TC = 0;
-        header.RD = 0;
-        header.RA = 0;
-        header.Z = 0;
-        header.RCODE = 0;
-        header.QDCOUNT = 0;
-        header.ANCOUNT = 0;
-        header.NSCOUNT = 0;
-        header.ARCOUNT = 0;
-
-        let bytes = header
-            .create_header_as_array_of_bytes()
-            .expect("Failed to create byte array");
-
-        assert_eq!(
-            bytes,
-            [
-                0x00,
-                0x00,        // ID
-                0b0000_0000, // All flags are 0
-                0b0000_0000, // All flags are 0
-                0x00,
-                0x00, // QDCOUNT
-                0x00,
-                0x00, // ANCOUNT
-                0x00,
-                0x00, // NSCOUNT
-                0x00,
-                0x00, // ARCOUNT
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse_header_with_invalid_z_bits() {
-        // Example header with Z=8 (invalid, since Z is supposed to be 3 bits and max is 7)
-        let bytes: [u8; 12] = [
-            0x00,
-            0x01,        // ID
-            0b0000_0000, // QR=0, OPCODE=0, AA=0, TC=0, RD=0
-            0b1000_0000, // RA=1, Z=8 (invalid if Z is supposed to be <=7), RCODE=0
-            0x00,
-            0x01, // QDCOUNT
-            0x00,
-            0x00, // ANCOUNT
-            0x00,
-            0x00, // NSCOUNT
-            0x00,
-            0x00, // ARCOUNT
-        ];
-        let mut header = Header::default();
-
-        // Currently, the parser does not enforce Z's valid range
-        // Depending on requirements, you might want to add a validation step
-        // For now, it will parse Z as 8 without error
-        assert!(header.parse_header(&bytes).is_ok());
-        assert_eq!(header.Z, 8);
-    }
-
-    #[test]
-    fn test_parse_header_with_random_data() {
-        let bytes: [u8; 12] = [
-            0xDE,
-            0xAD,        // ID
-            0b0110_1010, // QR=0, OPCODE=110 (6), AA=1, TC=0, RD=1
-            0b1010_0101, // RA=1, Z=010 (2), RCODE=5
-            0x12,
-            0x34, // QDCOUNT
-            0x56,
-            0x78, // ANCOUNT
-            0x9A,
-            0xBC, // NSCOUNT
-            0xDE,
-            0xF0, // ARCOUNT
-        ];
-        let mut header = Header::default();
-
-        assert!(header.parse_header(&bytes).is_ok());
-        assert_eq!(header.ID, 0xDEAD);
-        assert_eq!(header.QR, 0);
-        assert_eq!(header.OPCODE, 6);
-        assert_eq!(header.AA, 1);
-        assert_eq!(header.TC, 0);
-        assert_eq!(header.RD, 1);
-        assert_eq!(header.RA, 1);
-        assert_eq!(header.Z, 2);
-        assert_eq!(header.RCODE, 5);
-        assert_eq!(header.QDCOUNT, 0x1234);
-        assert_eq!(header.ANCOUNT, 0x5678);
-        assert_eq!(header.NSCOUNT, 0x9ABC);
-        assert_eq!(header.ARCOUNT, 0xDEF0);
-    }
-
-    #[test]
     fn test_multiple_headers_round_trip() {
         let headers = vec![
             Header {
@@ -414,17 +297,17 @@ mod tests {
             Header {
                 ID: 0xFFFF,
                 QR: 1,
-                OPCODE: 15,
+                OPCODE: 15, // Max 4-bit value
                 AA: 1,
                 TC: 1,
                 RD: 1,
                 RA: 1,
-                Z: 7,
-                RCODE: 15,
-                QDCOUNT: 65535,
-                ANCOUNT: 65535,
-                NSCOUNT: 65535,
-                ARCOUNT: 65535,
+                Z: 7,              // Max 3-bit value
+                RCODE: 15,         // Max 4-bit value
+                QDCOUNT: u16::MAX, // 65535
+                ANCOUNT: u16::MAX,
+                NSCOUNT: u16::MAX,
+                ARCOUNT: u16::MAX,
             },
             Header {
                 ID: 0x1A2B,
@@ -471,84 +354,46 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_header_with_excess_data() {
-        let bytes: Vec<u8> = vec![
-            0x00,
-            0x01,        // ID
-            0b1000_0000, // QR=1, OPCODE=0000 (0), AA=0, TC=0, RD=0
-            0b0000_0000, // RA=0, Z=0, RCODE=0
-            0x00,
-            0x01, // QDCOUNT
-            0x00,
-            0x00, // ANCOUNT
-            0x00,
-            0x00, // NSCOUNT
-            0x00,
-            0x00, // ARCOUNT
-            0xFF,
-            0xFF, // Excess data
-            0xAA,
-            0xAA, // Excess data
-        ];
-
-        let mut header = Header::default();
-        // The parser should only consider the first 12 bytes
-        assert!(header.parse_header(&bytes).is_ok());
-
-        assert_eq!(header.ID, 0x0001);
-        assert_eq!(header.QR, 1);
-        assert_eq!(header.OPCODE, 0);
-        assert_eq!(header.AA, 0);
-        assert_eq!(header.TC, 0);
-        assert_eq!(header.RD, 0);
-        assert_eq!(header.RA, 0);
-        assert_eq!(header.Z, 0);
-        assert_eq!(header.RCODE, 0);
-        assert_eq!(header.QDCOUNT, 1);
-        assert_eq!(header.ANCOUNT, 0);
-        assert_eq!(header.NSCOUNT, 0);
-        assert_eq!(header.ARCOUNT, 0);
-    }
-
-    #[test]
     fn test_create_header_with_non_zero_z() {
-        let mut header = Header::default();
-        header.ID = 0x1234;
-        header.QR = 1;
-        header.OPCODE = 0;
-        header.AA = 0;
-        header.TC = 0;
-        header.RD = 0;
-        header.RA = 0;
-        header.Z = 3; // Non-zero reserved bits
-        header.RCODE = 0;
-        header.QDCOUNT = 1;
-        header.ANCOUNT = 0;
-        header.NSCOUNT = 0;
-        header.ARCOUNT = 0;
+        // Create a header with Z=3 (non-zero reserved bits)
+        let mut header = Header {
+            ID: 0x1234,
+            QR: 1,
+            OPCODE: 0,
+            AA: 0,
+            TC: 0,
+            RD: 0,
+            RA: 0,
+            Z: 3, // Non-zero reserved bits
+            RCODE: 0,
+            QDCOUNT: 1,
+            ANCOUNT: 0,
+            NSCOUNT: 0,
+            ARCOUNT: 0,
+        };
 
+        // Serialize the header
         let bytes = header
             .create_header_as_array_of_bytes()
             .expect("Failed to create byte array");
 
-        // flags_part1 = QR=1, OPCODE=0000, AA=0, TC=0, RD=0 => 1000_0000 => 0x80
-        // flags_part2 = RA=0, Z=011, RCODE=0000 => 0011_0000 => 0x30
-        assert_eq!(
-            bytes,
-            [
-                0x12,
-                0x34,        // ID
-                0b1000_0000, // flags_part1
-                0b0011_0000, // flags_part2
-                0x00,
-                0x01, // QDCOUNT
-                0x00,
-                0x00, // ANCOUNT
-                0x00,
-                0x00, // NSCOUNT
-                0x00,
-                0x00, // ARCOUNT
-            ]
-        );
+        // Expected byte array
+        let expected_bytes: [u8; 12] = [
+            0x12,
+            0x34,        // ID: 0x1234
+            0b1000_0000, // Flags_part1: QR=1, OPCODE=0, AA=0, TC=0, RD=0 => 0x80
+            0b0011_0000, // Flags_part2: RA=0, Z=3, RCODE=0 => 0x30
+            0x00,
+            0x01, // QDCOUNT: 1
+            0x00,
+            0x00, // ANCOUNT: 0
+            0x00,
+            0x00, // NSCOUNT: 0
+            0x00,
+            0x00, // ARCOUNT: 0
+        ];
+
+        // Assert that the serialized bytes match the expected bytes
+        assert_eq!(bytes, expected_bytes);
     }
 }

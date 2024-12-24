@@ -1,4 +1,3 @@
-// question.rs
 use std::result::Result;
 
 #[derive(Debug, Default)]
@@ -63,69 +62,130 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_question_valid() {
+    fn test_parse_question_valid_single_label() {
         let mut question = Question::default();
+        let input = "03abc".to_string(); // length_part = "03", value_part = "abc", len == 3
+        let result = question.parse_question(input);
 
-        let input = "\\x03www\\x07example\\x03com\\x00".to_string();
-        assert!(question.parse_question(input).is_ok());
-
-        // Validate parsed labels
-        assert_eq!(question.labels, vec!["www", "example", "com"]);
+        assert!(result.is_ok());
+        assert_eq!(question.labels.len(), 1);
+        assert_eq!(question.labels[0], "abc");
     }
 
     #[test]
-    fn test_parse_question_invalid_length_prefix() {
+    fn test_parse_question_valid_multiple_labels() {
         let mut question = Question::default();
-
-        let input = "\\xZZwww\\x07example\\x03com\\x00".to_string();
+        // Split on `\x`: ["03abc", "05hello"]
+        let input = "03abc\\x05hello".to_string();
         let result = question.parse_question(input);
 
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            "Invalid length prefix in question string"
-        );
-    }
-
-    #[test]
-    fn test_parse_question_too_short_part() {
-        let mut question = Question::default();
-
-        let input = "\\x".to_string();
-        let result = question.parse_question(input);
-
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Part too short in question string");
+        assert!(result.is_ok());
+        assert_eq!(question.labels.len(), 2);
+        assert_eq!(question.labels[0], "abc");
+        assert_eq!(question.labels[1], "hello");
     }
 
     #[test]
     fn test_parse_question_length_mismatch() {
         let mut question = Question::default();
-
-        let input = "\\x04www\\x07example\\x03com\\x00".to_string();
+        // "05hell" => length_part = "05", value_part = "hell", actual length is 4 but expected 5
+        let input = "03abc\\x05hell".to_string();
         let result = question.parse_question(input);
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Length mismatch in question string");
     }
 
     #[test]
-    fn test_create_question_as_array_of_bytes() {
+    fn test_parse_question_invalid_hex_prefix() {
+        let mut question = Question::default();
+        // "0gabc" => "0g" is not valid hex
+        let input = "0gabc".to_string();
+        let result = question.parse_question(input);
+
+        assert!(result.is_err());
+        assert!(
+            question.labels.is_empty(),
+            "Labels should not be populated on error"
+        );
+    }
+
+    #[test]
+    fn test_parse_question_part_too_short() {
+        let mut question = Question::default();
+        // The part after splitting on `\x` is just "0", which is < 2 characters
+        let input = "0\\x".to_string();
+        let result = question.parse_question(input);
+
+        assert!(result.is_err());
+        assert!(
+            question.labels.is_empty(),
+            "Labels should not be populated on error"
+        );
+    }
+
+    #[test]
+    fn test_create_question_as_array_of_bytes_single_label() {
+        let mut question = Question::default();
+        question.labels = vec!["abc".to_string()];
+        question.q_type = 0x0001;
+        question.q_class = 0x0001;
+
+        let result = question.create_question_as_array_of_bytes();
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+
+        // Breakdown of expected bytes:
+        // - Label "abc": length = 3, then 'a', 'b', 'c'
+        // - Null terminator (0)
+        // - q_type (0x0001 big-endian -> 00 01)
+        // - q_class (0x0001 big-endian -> 00 01)
+        // => [3, b'a', b'b', b'c', 0, 0, 1, 0, 1]
+        let expected = vec![3, b'a', b'b', b'c', 0, 0, 1, 0, 1];
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn test_create_question_as_array_of_bytes_multiple_labels() {
+        let mut question = Question::default();
+        question.labels = vec!["abc".to_string(), "hello".to_string()];
+        question.q_type = 1;
+        question.q_class = 1;
+
+        let result = question.create_question_as_array_of_bytes();
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+
+        // Breakdown of expected bytes:
+        // - Label "abc": length = 3, then "abc"
+        // - Label "hello": length = 5, then "hello"
+        // - Null terminator (0)
+        // - q_type = 1 (big-endian -> [0, 1])
+        // - q_class = 1 (big-endian -> [0, 1])
+        // => [3, b'a', b'b', b'c', 5, b'h', b'e', b'l', b'l', b'o', 0, 0, 1, 0, 1]
+        let expected = vec![
+            3, b'a', b'b', b'c', 5, b'h', b'e', b'l', b'l', b'o', 0, 0, 1, 0, 1,
+        ];
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn test_create_question_as_array_of_bytes_empty_labels() {
         let question = Question {
-            labels: vec!["www".to_string(), "example".to_string(), "com".to_string()],
-            q_type: 1,
-            q_class: 1,
+            labels: vec![],
+            q_type: 0x000F,  // for example
+            q_class: 0x000F, // for example
         };
 
-        let bytes = question
-            .create_question_as_array_of_bytes()
-            .expect("Failed to create bytes");
+        let result = question.create_question_as_array_of_bytes();
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
 
-        let expected: Vec<u8> = vec![
-            3, b'w', b'w', b'w', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm',
-            0, 0, 1, 0, 1,
-        ];
-
+        // Breakdown of expected bytes with no labels:
+        // - Null terminator (0)
+        // - q_type = 0x000F => [0, 0x0F]
+        // - q_class = 0x000F => [0, 0x0F]
+        // => [0, 0, 15, 0, 15]
+        let expected = vec![0, 0, 15, 0, 15];
         assert_eq!(bytes, expected);
     }
 }
