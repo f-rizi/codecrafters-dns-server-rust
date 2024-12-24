@@ -1,10 +1,6 @@
 use std::result::Result;
 
-use crate::{
-    answer::{self, Answer},
-    header::Header,
-    question::{self, Question},
-};
+use crate::{answer::Answer, header::Header, question::Question};
 
 #[derive(Debug, Default)]
 pub struct Message {
@@ -24,6 +20,10 @@ impl Message {
 
         self.header.ANCOUNT = self.header.QDCOUNT;
         self.header.QR = 1;
+
+        if self.header.OPCODE != 0 {
+            self.header.RCODE = 4;
+        }
 
         Ok(())
     }
@@ -66,6 +66,9 @@ impl Message {
             answer.name = question.name.clone();
             answer.q_type = question.q_type;
             answer.q_class = question.q_class;
+            answer.TTL = 40;
+            answer.Length = 4;
+            answer.Data = vec![8, 8, 8, 8];
             answers.push(answer);
         }
 
@@ -80,7 +83,6 @@ impl Message {
             let question = self.parse_question(offset)?;
             questions.push(question.0);
             offset = question.1;
-            //offset += 1;
         }
 
         Ok(questions)
@@ -114,6 +116,7 @@ impl Message {
             let len = self.bytes[offset];
 
             if len == 0 {
+                result.push(0);
                 offset += 1;
                 break;
             } else if len & 0xC0 == 0xC0 {
@@ -145,10 +148,10 @@ impl Message {
         let mut bytes = Vec::new();
 
         for answer in self.answers.iter_mut() {
-            let temp = answer.create_answer_as_array_of_bytes();
+            let answer_array_result = answer.create_answer_as_array_of_bytes();
 
-            if let temp_1 = temp.unwrap() {
-                bytes.extend_from_slice(&temp_1);
+            if let answer_array = answer_array_result.unwrap() {
+                bytes.extend_from_slice(&answer_array);
             }
         }
 
@@ -159,10 +162,10 @@ impl Message {
         let mut bytes = Vec::new();
 
         for question in self.questions.iter_mut() {
-            let temp = question.create_question_as_array_of_bytes();
+            let question_array_result = question.create_question_as_array_of_bytes();
 
-            if let temp_1 = temp.unwrap() {
-                bytes.extend_from_slice(&temp_1);
+            if let question_array = question_array_result.unwrap() {
+                bytes.extend_from_slice(&question_array);
             }
         }
 

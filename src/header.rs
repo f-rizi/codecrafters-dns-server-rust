@@ -24,11 +24,12 @@ impl Header {
         bytes[0] = self.ID.to_be_bytes()[0];
         bytes[1] = self.ID.to_be_bytes()[1];
 
-        let temp = (self.QR << 7) | (self.OPCODE << 3) | (self.AA << 2) | (self.TC << 1) | self.RD;
-        let temp2 = (self.RA << 7) | (self.Z << 4) | self.RCODE;
+        let flag_part_1 =
+            (self.QR << 7) | (self.OPCODE << 3) | (self.AA << 2) | (self.TC << 1) | self.RD;
+        let flag_part_2 = (self.RA << 7) | (self.Z << 4) | self.RCODE;
 
-        bytes[2] = temp;
-        bytes[3] = temp2;
+        bytes[2] = flag_part_1;
+        bytes[3] = flag_part_2;
 
         bytes[4] = self.QDCOUNT.to_be_bytes()[0];
         bytes[5] = self.QDCOUNT.to_be_bytes()[1];
