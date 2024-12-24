@@ -2,51 +2,51 @@ use std::result::Result;
 
 #[derive(Debug, Default)]
 pub struct Question {
-    pub labels: Vec<String>,
-    pub q_type: u16,
-    pub q_class: u16,
+    pub name: Vec<u8>, // Vector for storing the domain name
+    pub q_type: u16,   // Query type (e.g., A)
+    pub q_class: u16,  // Query class (e.g., IN)
 }
 
 impl Question {
-    pub fn parse_question(&mut self, question: String) -> Result<(), &'static str> {
-        let label_parts: Vec<&str> = question
-            .split("\\x")
-            .filter(|part| !part.is_empty())
-            .collect();
+    pub fn parse_questions(&mut self, bytes: &Vec<u8>, offset: usize) -> Result<(), String> {
+        if bytes.len() == 0 {
+            return Err("Header size is zero, can not get a question".to_string());
+        }
 
-        for part in label_parts {
-            if part.len() >= 2 {
-                let (length_part, value_part) = part.split_at(2);
-                if let Ok(length) = u8::from_str_radix(length_part, 16) {
-                    if length as usize != value_part.len() {
-                        println!(
-                            "Length mismatch: expected {}, got {}",
-                            length,
-                            value_part.len()
-                        );
-                        return Err("Length mismatch in question string");
-                    }
-                    self.labels.push(value_part.to_string());
-                } else {
-                    println!("Invalid length prefix: {}", length_part);
-                    return Err("Invalid length prefix in question string");
-                }
+        let mut index: usize = offset;
+
+        while bytes[index] != 0 {
+            if bytes[index] < 192 {
+                let temp: &[u8] = &bytes[index..index + bytes[index] as usize];
+                self.name.extend_from_slice(temp);
+                index = index + bytes[index] as usize;
             } else {
-                println!("Part too short: {}", part);
-                return Err("Part too short in question string");
+                let temp = self.get_offset(bytes, index);
+                index = index + temp.len();
+                self.name.extend(temp);
             }
         }
 
+        self.q_type = u16::from_be_bytes([bytes[index], bytes[index + 1]]);
+        self.q_class = u16::from_be_bytes([bytes[index + 2], bytes[index + 3]]);
+
         Ok(())
+    }
+
+    fn get_offset(&mut self, bytes: &Vec<u8>, start: usize) -> Vec<u8> {
+        let mut end = start;
+
+        while bytes[end] != 0 {
+            end += 1
+        }
+
+        return bytes[start..end].to_vec();
     }
 
     pub fn create_question_as_array_of_bytes(&self) -> Result<Vec<u8>, &'static str> {
         let mut bytes: Vec<u8> = Vec::new();
 
-        for part in &self.labels {
-            bytes.push(part.len() as u8);
-            bytes.extend_from_slice(part.as_bytes());
-        }
+        bytes.extend_from_slice(&self.name);
 
         bytes.push(0);
 
@@ -57,135 +57,75 @@ impl Question {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_question_valid_single_label() {
-        let mut question = Question::default();
-        let input = "03abc".to_string(); // length_part = "03", value_part = "abc", len == 3
-        let result = question.parse_question(input);
-
-        assert!(result.is_ok());
-        assert_eq!(question.labels.len(), 1);
-        assert_eq!(question.labels[0], "abc");
-    }
-
-    #[test]
-    fn test_parse_question_valid_multiple_labels() {
-        let mut question = Question::default();
-        // Split on `\x`: ["03abc", "05hello"]
-        let input = "03abc\\x05hello".to_string();
-        let result = question.parse_question(input);
-
-        assert!(result.is_ok());
-        assert_eq!(question.labels.len(), 2);
-        assert_eq!(question.labels[0], "abc");
-        assert_eq!(question.labels[1], "hello");
-    }
-
-    #[test]
-    fn test_parse_question_length_mismatch() {
-        let mut question = Question::default();
-        // "05hell" => length_part = "05", value_part = "hell", actual length is 4 but expected 5
-        let input = "03abc\\x05hell".to_string();
-        let result = question.parse_question(input);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_question_invalid_hex_prefix() {
-        let mut question = Question::default();
-        // "0gabc" => "0g" is not valid hex
-        let input = "0gabc".to_string();
-        let result = question.parse_question(input);
-
-        assert!(result.is_err());
-        assert!(
-            question.labels.is_empty(),
-            "Labels should not be populated on error"
-        );
-    }
-
-    #[test]
-    fn test_parse_question_part_too_short() {
-        let mut question = Question::default();
-        // The part after splitting on `\x` is just "0", which is < 2 characters
-        let input = "0\\x".to_string();
-        let result = question.parse_question(input);
-
-        assert!(result.is_err());
-        assert!(
-            question.labels.is_empty(),
-            "Labels should not be populated on error"
-        );
-    }
-
-    #[test]
-    fn test_create_question_as_array_of_bytes_single_label() {
-        let mut question = Question::default();
-        question.labels = vec!["abc".to_string()];
-        question.q_type = 0x0001;
-        question.q_class = 0x0001;
-
-        let result = question.create_question_as_array_of_bytes();
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-
-        // Breakdown of expected bytes:
-        // - Label "abc": length = 3, then 'a', 'b', 'c'
-        // - Null terminator (0)
-        // - q_type (0x0001 big-endian -> 00 01)
-        // - q_class (0x0001 big-endian -> 00 01)
-        // => [3, b'a', b'b', b'c', 0, 0, 1, 0, 1]
-        let expected = vec![3, b'a', b'b', b'c', 0, 0, 1, 0, 1];
-        assert_eq!(bytes, expected);
-    }
-
-    #[test]
-    fn test_create_question_as_array_of_bytes_multiple_labels() {
-        let mut question = Question::default();
-        question.labels = vec!["abc".to_string(), "hello".to_string()];
-        question.q_type = 1;
-        question.q_class = 1;
-
-        let result = question.create_question_as_array_of_bytes();
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-
-        // Breakdown of expected bytes:
-        // - Label "abc": length = 3, then "abc"
-        // - Label "hello": length = 5, then "hello"
-        // - Null terminator (0)
-        // - q_type = 1 (big-endian -> [0, 1])
-        // - q_class = 1 (big-endian -> [0, 1])
-        // => [3, b'a', b'b', b'c', 5, b'h', b'e', b'l', b'l', b'o', 0, 0, 1, 0, 1]
-        let expected = vec![
-            3, b'a', b'b', b'c', 5, b'h', b'e', b'l', b'l', b'o', 0, 0, 1, 0, 1,
+    fn test_parse_questions() {
+        // Example DNS question:
+        // Name: "www.example.com."
+        // Type: A (0x0001)
+        // Class: IN (0x0001)
+        let bytes: Vec<u8> = vec![
+            3, b'w', b'w', b'w', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0,
+            0, 1, 0, 1,
         ];
-        assert_eq!(bytes, expected);
+        let mut question = Question::default();
+
+        // Call parse_questions with offset 0
+        assert!(question.parse_questions(&bytes, 0).is_ok());
+
+        // Verify the parsed question
+        assert_eq!(
+            question.name,
+            vec![3, b'w', b'w', b'w', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm']
+        ); // Name in raw DNS format
+        assert_eq!(question.q_type, 1); // Type A
+        assert_eq!(question.q_class, 1); // Class IN
     }
 
     #[test]
-    fn test_create_question_as_array_of_bytes_empty_labels() {
-        let question = Question {
-            labels: vec![],
-            q_type: 0x000F,  // for example
-            q_class: 0x000F, // for example
-        };
+    fn test_parse_questions_with_compression() {
+        // Example DNS questions with compression:
+        // Question 1: Name: "www.example.com."
+        // Question 2: Name: "api.example.com." using compression pointer
+        let bytes: Vec<u8> = vec![
+            // Question 1
+            3, b'w', b'w', b'w', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0,
+            0, 1, 0, 1,
+            // Question 2 (compressed)
+            3, b'a', b'p', b'i', 192, 0, 0, 1, 0, 1,
+        ];
 
-        let result = question.create_question_as_array_of_bytes();
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
+        // Parse the first question
+        let mut question1 = Question::default();
+        assert!(question1.parse_questions(&bytes, 0).is_ok());
+        assert_eq!(
+            question1.name,
+            vec![3, b'w', b'w', b'w', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm']
+        );
+        assert_eq!(question1.q_type, 1); // Type A
+        assert_eq!(question1.q_class, 1); // Class IN
 
-        // Breakdown of expected bytes with no labels:
-        // - Null terminator (0)
-        // - q_type = 0x000F => [0, 0x0F]
-        // - q_class = 0x000F => [0, 0x0F]
-        // => [0, 0, 15, 0, 15]
-        let expected = vec![0, 0, 15, 0, 15];
-        assert_eq!(bytes, expected);
+        // Parse the second question
+        let mut question2 = Question::default();
+        assert!(question2.parse_questions(&bytes, 17).is_ok());
+        assert_eq!(
+            question2.name,
+            vec![3, b'a', b'p', b'i', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm']
+        );
+        assert_eq!(question2.q_type, 1); // Type A
+        assert_eq!(question2.q_class, 1); // Class IN
     }
+
+    // #[test]
+    // fn test_parse_questions_invalid_offset() {
+    //     let bytes: Vec<u8> = vec![3, b'w', b'w', b'w', 0, 0, 1, 0, 1]; // Shortened example
+    //     let mut question = Question::default();
+
+    //     // Provide an invalid offset
+    //     assert!(question.parse_questions(&bytes, 100).is_err()); // Offset out of bounds
+    // }
 }
