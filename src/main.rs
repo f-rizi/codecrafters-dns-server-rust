@@ -35,7 +35,9 @@ fn main() {
                 response_header.QR = 1;
                 response_header.QDCOUNT = 1;
                 response_header.ANCOUNT = 1;
-                response_header.RCODE = 0;
+                response_header.RCODE = 4;
+                response_header.OPCODE = received_header.OPCODE;
+                response_header.RD = received_header.RD;
 
                 let mut response_answer = Answer::default();
                 response_answer.Name = vec!["codecrafters".to_string(), "io".to_string()];
