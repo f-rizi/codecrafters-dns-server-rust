@@ -1,6 +1,6 @@
 use std::result::Result;
 
-use crate::{answer::Answer, header::Header, question::Question};
+use crate::{answer::Answer, errors::DnsError, header::Header, question::Question};
 
 #[derive(Debug, Default)]
 pub struct Message {
@@ -11,7 +11,7 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn parse_message(&mut self, bytes: &[u8]) -> Result<(), String> {
+    pub fn parse_message(&mut self, bytes: &[u8]) -> Result<(), DnsError> {
         self.bytes = bytes.to_vec();
 
         self.header = self.parse_header()?;
@@ -28,9 +28,11 @@ impl Message {
         Ok(())
     }
 
-    pub fn parse_header(&mut self) -> Result<Header, String> {
+    pub fn parse_header(&mut self) -> Result<Header, DnsError> {
         if self.bytes.len() < 12 {
-            return Err("Header size must be at least 12 bytes".to_string());
+            return Err(DnsError::Parse(
+                "Header size must be at least 12 bytes".to_string(),
+            ));
         }
 
         let mut header = Header::default();
@@ -58,7 +60,7 @@ impl Message {
         Ok(header)
     }
 
-    pub fn parse_questions(&mut self) -> Result<Vec<Question>, String> {
+    pub fn parse_questions(&mut self) -> Result<Vec<Question>, DnsError> {
         let mut questions = Vec::new();
         let mut offset = 12;
 
@@ -71,12 +73,14 @@ impl Message {
         Ok(questions)
     }
 
-    pub fn parse_question(&mut self, mut offset: usize) -> Result<(Question, usize), String> {
+    pub fn parse_question(&mut self, mut offset: usize) -> Result<(Question, usize), DnsError> {
         let (name_bytes, consumed) = self.parse_name(offset)?;
         offset = consumed;
 
         if offset + 4 > self.bytes.len() {
-            return Err("Not enough bytes for QTYPE/QCLASS".to_string());
+            return Err(DnsError::Parse(
+                "Not enough bytes for QTYPE/QCLASS".to_string(),
+            ));
         }
 
         let q_type = u16::from_be_bytes([self.bytes[offset], self.bytes[offset + 1]]);
@@ -93,12 +97,14 @@ impl Message {
         ))
     }
 
-    fn parse_name(&self, mut offset: usize) -> Result<(Vec<u8>, usize), String> {
+    fn parse_name(&self, mut offset: usize) -> Result<(Vec<u8>, usize), DnsError> {
         let mut result = Vec::new();
 
         loop {
             if offset >= self.bytes.len() {
-                return Err("Ran out of bytes while parsing name".to_string());
+                return Err(DnsError::Parse(
+                    "Ran out of bytes while parsing name".to_string(),
+                ));
             }
 
             let len = self.bytes[offset];
@@ -107,10 +113,11 @@ impl Message {
                 result.push(0);
                 offset += 1;
                 break;
-            }
-            else if len & 0xC0 == 0xC0 {
+            } else if len & 0xC0 == 0xC0 {
                 if offset + 1 >= self.bytes.len() {
-                    return Err("Not enough bytes for name pointer".to_string());
+                    return Err(DnsError::Parse(
+                        "Not enough bytes for name pointer".to_string(),
+                    ));
                 }
                 let pointer_offset =
                     ((((len & 0x3F) as u16) << 8) | (self.bytes[offset + 1] as u16)) as usize;
@@ -122,7 +129,9 @@ impl Message {
             } else {
                 offset += 1;
                 if offset + (len as usize) > self.bytes.len() {
-                    return Err("Label extends past end of buffer".to_string());
+                    return Err(DnsError::Parse(
+                        "Label extends past end of buffer".to_string(),
+                    ));
                 }
                 let label = &self.bytes[offset..offset + (len as usize)];
                 offset += len as usize;
@@ -135,7 +144,7 @@ impl Message {
         Ok((result, offset))
     }
 
-    fn parse_remote_answers(&mut self) -> Result<Vec<Answer>, String> {
+    fn parse_remote_answers(&mut self) -> Result<Vec<Answer>, DnsError> {
         let mut answers = Vec::new();
 
         let mut offset = 12;
@@ -153,12 +162,14 @@ impl Message {
         Ok(answers)
     }
 
-    fn parse_answer(&mut self, mut offset: usize) -> Result<(Answer, usize), String> {
+    fn parse_answer(&mut self, mut offset: usize) -> Result<(Answer, usize), DnsError> {
         let (name, consumed) = self.parse_name(offset)?;
         offset = consumed;
 
         if offset + 10 > self.bytes.len() {
-            return Err("Not enough bytes to parse answer header".to_string());
+            return Err(DnsError::Parse(
+                "Not enough bytes to parse answer header".to_string(),
+            ));
         }
         let q_type = u16::from_be_bytes([self.bytes[offset], self.bytes[offset + 1]]);
         let q_class = u16::from_be_bytes([self.bytes[offset + 2], self.bytes[offset + 3]]);
@@ -172,7 +183,7 @@ impl Message {
         offset += 10;
 
         if offset + rdlength as usize > self.bytes.len() {
-            return Err("Not enough bytes for RDATA".to_string());
+            return Err(DnsError::Parse("Not enough bytes for RDATA".to_string()));
         }
         let rdata = self.bytes[offset..offset + (rdlength as usize)].to_vec();
         offset += rdlength as usize;
@@ -189,7 +200,7 @@ impl Message {
         Ok((answer, offset))
     }
 
-    pub fn parse_answers(&mut self) -> Result<Vec<Answer>, String> {
+    pub fn parse_answers(&mut self) -> Result<Vec<Answer>, DnsError> {
         let mut answers = Vec::new();
         for question in &self.questions {
             let mut a = Answer::default();
@@ -204,19 +215,18 @@ impl Message {
         Ok(answers)
     }
 
-    pub fn create_response_bytes(&mut self) -> Result<Vec<u8>, &'static str> {
+    pub fn create_response_bytes(&mut self) -> Result<Vec<u8>, DnsError> {
         let header_bytes = self
             .header
             .create_header_as_array_of_bytes()
-            .map_err(|_| "Failed to serialize header")?;
-
+            .map_err(|_| DnsError::Serialization("Failed to serialize header".to_string()))?;
         let question_bytes = self
             .create_questions_as_array_of_bytes()
-            .map_err(|_| "Failed to serialize questions")?;
+            .map_err(|_| DnsError::Serialization("Failed to serialize questions".to_string()))?;
 
         let answer_bytes = self
             .create_answers_as_array_of_bytes()
-            .map_err(|_| "Failed to serialize answers")?;
+            .map_err(|_| DnsError::Serialization("Failed to serialize answers".to_string()))?;
 
         let mut combined = Vec::new();
         combined.extend_from_slice(&header_bytes);
@@ -226,19 +236,19 @@ impl Message {
         Ok(combined)
     }
 
-    pub fn create_questions_as_array_of_bytes(&mut self) -> Result<Vec<u8>, &'static str> {
+    pub fn create_questions_as_array_of_bytes(&mut self) -> Result<Vec<u8>, DnsError> {
         let mut bytes = Vec::new();
         for q in &mut self.questions {
-            let question_bytes = q.create_question_as_array_of_bytes().unwrap();
+            let question_bytes = q.create_question_as_array_of_bytes()?;
             bytes.extend_from_slice(&question_bytes);
         }
         Ok(bytes)
     }
 
-    pub fn create_answers_as_array_of_bytes(&mut self) -> Result<Vec<u8>, &'static str> {
+    pub fn create_answers_as_array_of_bytes(&mut self) -> Result<Vec<u8>, DnsError> {
         let mut bytes = Vec::new();
         for ans in &mut self.answers {
-            let answer_bytes = ans.create_answer_as_array_of_bytes().unwrap();
+            let answer_bytes = ans.create_answer_as_array_of_bytes()?;
             bytes.extend_from_slice(&answer_bytes);
         }
         Ok(bytes)

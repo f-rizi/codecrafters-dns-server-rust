@@ -1,3 +1,5 @@
+use crate::errors::DnsError;
+
 #[derive(Clone, Debug, Default)]
 pub struct Question {
     pub name: Vec<u8>,
@@ -6,7 +8,7 @@ pub struct Question {
 }
 
 impl Question {
-    pub fn create_question_as_array_of_bytes(&mut self) -> Result<Vec<u8>, &'static str> {
+    pub fn create_question_as_array_of_bytes(&mut self) -> Result<Vec<u8>, DnsError> {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.extend_from_slice(&self.name);
         bytes.extend_from_slice(&self.q_type.to_be_bytes());

@@ -1,4 +1,5 @@
 mod answer;
+mod errors;
 mod header;
 mod message;
 mod question;
@@ -14,8 +15,12 @@ use std::error::Error;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
+use errors::DnsError;
+
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<(), DnsError> {
+    env_logger::init();
+
     let args: Vec<String> = env::args().collect();
     let mut redirect_address = String::new();
 
@@ -42,7 +47,7 @@ async fn main() -> std::io::Result<()> {
         let (size, source) = match udp_socket.recv_from(&mut buf).await {
             Ok((size, src)) => (size, src),
             Err(e) => {
-                eprintln!("Failed to receive data: {}", e);
+                log::error!("Failed to receive data: {}", e);
                 continue;
             }
         };
@@ -52,7 +57,7 @@ async fn main() -> std::io::Result<()> {
         // Spawn a task to handle the DNS request
         tokio::spawn(async move {
             if let Err(e) = handle_client(&udp_socket, &redirect_address, packet, source).await {
-                eprintln!("Error handling client {}: {}", source, e);
+                log::error!("Error handling client: {}", e);
             }
         });
     }
@@ -63,17 +68,17 @@ async fn handle_client(
     redirect_address: &Arc<String>,
     packet: Vec<u8>,
     source: std::net::SocketAddr,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<(), DnsError> {
     let mut client_message = Message::default();
     if let Err(e) = client_message.parse_message(&packet) {
-        eprintln!("Failed to parse DNS request from {}: {}", source, e);
-        return Ok(());
+        log::error!("Failed to parse DNS request from {}: {}", source, e);
+        return Err(e);
     }
 
     let questions = client_message.questions.clone();
 
     if questions.is_empty() {
-        eprintln!("No questions found in the DNS request from {}", source);
+        log::error!("No questions found in the DNS request from {}", source);
         return Ok(());
     }
 
@@ -106,7 +111,9 @@ async fn handle_client(
                 Ok(answer) => {
                     combined_answers.push(answer);
                 }
-                Err(e) => {}
+                Err(e) => {
+                    log::error!("Failed to resolve question: {}", e);
+                }
             }
         }
 
@@ -126,7 +133,7 @@ async fn resolve_question(
     question: &Question,
     resolver_socket: &Arc<UdpSocket>,
     resolver_addr: &str,
-) -> Result<Answer, Box<dyn Error + Send + Sync>> {
+) -> Result<Answer, DnsError> {
     let mut query_message = Message::default();
     query_message.header.ID = random::<u16>();
     query_message.header.QR = 0;
@@ -154,6 +161,6 @@ async fn resolve_question(
     if let Some(answer) = response_message.answers.first() {
         Ok(answer.clone())
     } else {
-        Err("No answer received".into())
+        Err(DnsError::Resolution("No answer received".to_string()))
     }
 }

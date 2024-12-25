@@ -1,3 +1,5 @@
+use crate::errors::DnsError;
+
 #[derive(Clone, Debug, Default)]
 pub struct Header {
     pub ID: u16,
@@ -16,7 +18,7 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn create_header_as_array_of_bytes(&mut self) -> Result<[u8; 12], &'static str> {
+    pub fn create_header_as_array_of_bytes(&mut self) -> Result<[u8; 12], DnsError> {
         let mut bytes = [0u8; 12];
 
         bytes[0] = self.ID.to_be_bytes()[0];
