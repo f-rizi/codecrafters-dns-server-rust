@@ -1,20 +1,16 @@
-mod answer;
+mod dns;
 mod errors;
-mod header;
-mod message;
-mod question;
 
-use answer::Answer;
+use dns::answer::Answer;
 use futures::future::join_all;
-use message::Message;
-use question::Question;
 
 use rand::random;
 use std::env;
-use std::error::Error;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
+use crate::dns::message::Message;
+use crate::dns::question::Question;
 use errors::DnsError;
 
 #[tokio::main]

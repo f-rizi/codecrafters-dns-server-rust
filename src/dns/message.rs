@@ -1,6 +1,8 @@
 use std::result::Result;
 
-use crate::{answer::Answer, errors::DnsError, header::Header, question::Question};
+use crate::errors::DnsError;
+
+use super::{answer::Answer, header::Header, question::Question};
 
 #[derive(Debug, Default)]
 pub struct Message {
