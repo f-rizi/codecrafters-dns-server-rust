@@ -1,5 +1,3 @@
-use std::result::Result;
-
 #[derive(Clone, Debug, Default)]
 pub struct Header {
     pub ID: u16,

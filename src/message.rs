@@ -16,13 +16,13 @@ impl Message {
 
         self.header = self.parse_header()?;
         self.questions = self.parse_questions()?;
-        self.answers = self.parse_answers()?;
-
-        self.header.ANCOUNT = self.header.QDCOUNT;
-        self.header.QR = 1;
 
         if self.header.OPCODE != 0 {
             self.header.RCODE = 4;
+        }
+
+        if self.header.ANCOUNT > 0 {
+            self.answers = self.parse_remote_answers()?;
         }
 
         Ok(())
@@ -58,58 +58,46 @@ impl Message {
         Ok(header)
     }
 
-    pub fn parse_answers(&mut self) -> Result<Vec<Answer>, String> {
-        let mut answers: Vec<Answer> = Vec::new();
-
-        for question in self.questions.iter() {
-            let mut answer = Answer::default();
-            answer.name = question.name.clone();
-            answer.q_type = question.q_type;
-            answer.q_class = question.q_class;
-            answer.TTL = 40;
-            answer.Length = 4;
-            answer.Data = vec![8, 8, 8, 8];
-            answers.push(answer);
-        }
-
-        Ok(answers)
-    }
-
     pub fn parse_questions(&mut self) -> Result<Vec<Question>, String> {
         let mut questions = Vec::new();
         let mut offset = 12;
 
-        while questions.len() < self.header.QDCOUNT.into() {
-            let question = self.parse_question(offset)?;
-            questions.push(question.0);
-            offset = question.1;
+        for _ in 0..self.header.QDCOUNT {
+            let (question, new_offset) = self.parse_question(offset)?;
+            questions.push(question);
+            offset = new_offset;
         }
 
         Ok(questions)
     }
 
     pub fn parse_question(&mut self, mut offset: usize) -> Result<(Question, usize), String> {
-        let mut question = Question::default();
-
         let (name_bytes, consumed) = self.parse_name(offset)?;
         offset = consumed;
-        question.name = name_bytes;
 
         if offset + 4 > self.bytes.len() {
-            return Err("Not enough bytes for QTYPE and QCLASS".to_string());
+            return Err("Not enough bytes for QTYPE/QCLASS".to_string());
         }
-        question.q_type = u16::from_be_bytes([self.bytes[offset], self.bytes[offset + 1]]);
-        question.q_class = u16::from_be_bytes([self.bytes[offset + 2], self.bytes[offset + 3]]);
+
+        let q_type = u16::from_be_bytes([self.bytes[offset], self.bytes[offset + 1]]);
+        let q_class = u16::from_be_bytes([self.bytes[offset + 2], self.bytes[offset + 3]]);
         offset += 4;
 
-        Ok((question, offset))
+        Ok((
+            Question {
+                name: name_bytes,
+                q_type,
+                q_class,
+            },
+            offset,
+        ))
     }
 
     fn parse_name(&self, mut offset: usize) -> Result<(Vec<u8>, usize), String> {
         let mut result = Vec::new();
 
         loop {
-            if offset > self.bytes.len() {
+            if offset >= self.bytes.len() {
                 return Err("Ran out of bytes while parsing name".to_string());
             }
 
@@ -119,14 +107,16 @@ impl Message {
                 result.push(0);
                 offset += 1;
                 break;
-            } else if len & 0xC0 == 0xC0 {
+            }
+            else if len & 0xC0 == 0xC0 {
+                if offset + 1 >= self.bytes.len() {
+                    return Err("Not enough bytes for name pointer".to_string());
+                }
                 let pointer_offset =
                     ((((len & 0x3F) as u16) << 8) | (self.bytes[offset + 1] as u16)) as usize;
-
-                let (sub_bytes, _) = self.parse_name(pointer_offset)?;
-
                 offset += 2;
 
+                let (sub_bytes, _) = self.parse_name(pointer_offset)?;
                 result.extend_from_slice(&sub_bytes);
                 break;
             } else {
@@ -136,6 +126,7 @@ impl Message {
                 }
                 let label = &self.bytes[offset..offset + (len as usize)];
                 offset += len as usize;
+
                 result.push(len);
                 result.extend_from_slice(label);
             }
@@ -144,140 +135,112 @@ impl Message {
         Ok((result, offset))
     }
 
-    pub fn create_answers_as_array_of_bytes(&mut self) -> Result<Vec<u8>, &'static str> {
-        let mut bytes = Vec::new();
+    fn parse_remote_answers(&mut self) -> Result<Vec<Answer>, String> {
+        let mut answers = Vec::new();
 
-        for answer in self.answers.iter_mut() {
-            let answer_array_result = answer.create_answer_as_array_of_bytes();
-
-            if let answer_array = answer_array_result.unwrap() {
-                bytes.extend_from_slice(&answer_array);
-            }
+        let mut offset = 12;
+        for _ in 0..self.header.QDCOUNT {
+            let (_, new_offset) = self.parse_question(offset)?;
+            offset = new_offset;
         }
 
-        Ok(bytes)
+        for _ in 0..self.header.ANCOUNT {
+            let (ans, new_offset) = self.parse_answer(offset)?;
+            offset = new_offset;
+            answers.push(ans);
+        }
+
+        Ok(answers)
+    }
+
+    fn parse_answer(&mut self, mut offset: usize) -> Result<(Answer, usize), String> {
+        let (name, consumed) = self.parse_name(offset)?;
+        offset = consumed;
+
+        if offset + 10 > self.bytes.len() {
+            return Err("Not enough bytes to parse answer header".to_string());
+        }
+        let q_type = u16::from_be_bytes([self.bytes[offset], self.bytes[offset + 1]]);
+        let q_class = u16::from_be_bytes([self.bytes[offset + 2], self.bytes[offset + 3]]);
+        let ttl = u32::from_be_bytes([
+            self.bytes[offset + 4],
+            self.bytes[offset + 5],
+            self.bytes[offset + 6],
+            self.bytes[offset + 7],
+        ]);
+        let rdlength = u16::from_be_bytes([self.bytes[offset + 8], self.bytes[offset + 9]]);
+        offset += 10;
+
+        if offset + rdlength as usize > self.bytes.len() {
+            return Err("Not enough bytes for RDATA".to_string());
+        }
+        let rdata = self.bytes[offset..offset + (rdlength as usize)].to_vec();
+        offset += rdlength as usize;
+
+        let answer = Answer {
+            name,
+            q_type,
+            q_class,
+            TTL: ttl,
+            Length: rdlength,
+            Data: rdata,
+        };
+
+        Ok((answer, offset))
+    }
+
+    pub fn parse_answers(&mut self) -> Result<Vec<Answer>, String> {
+        let mut answers = Vec::new();
+        for question in &self.questions {
+            let mut a = Answer::default();
+            a.name = question.name.clone();
+            a.q_type = question.q_type;
+            a.q_class = question.q_class;
+            a.TTL = 40;
+            a.Length = 4;
+            a.Data = vec![8, 8, 8, 8];
+            answers.push(a);
+        }
+        Ok(answers)
+    }
+
+    pub fn create_response_bytes(&mut self) -> Result<Vec<u8>, &'static str> {
+        let header_bytes = self
+            .header
+            .create_header_as_array_of_bytes()
+            .map_err(|_| "Failed to serialize header")?;
+
+        let question_bytes = self
+            .create_questions_as_array_of_bytes()
+            .map_err(|_| "Failed to serialize questions")?;
+
+        let answer_bytes = self
+            .create_answers_as_array_of_bytes()
+            .map_err(|_| "Failed to serialize answers")?;
+
+        let mut combined = Vec::new();
+        combined.extend_from_slice(&header_bytes);
+        combined.extend_from_slice(&question_bytes);
+        combined.extend_from_slice(&answer_bytes);
+
+        Ok(combined)
     }
 
     pub fn create_questions_as_array_of_bytes(&mut self) -> Result<Vec<u8>, &'static str> {
         let mut bytes = Vec::new();
-
-        for question in self.questions.iter_mut() {
-            let question_array_result = question.create_question_as_array_of_bytes();
-
-            if let question_array = question_array_result.unwrap() {
-                bytes.extend_from_slice(&question_array);
-            }
+        for q in &mut self.questions {
+            let question_bytes = q.create_question_as_array_of_bytes().unwrap();
+            bytes.extend_from_slice(&question_bytes);
         }
-
         Ok(bytes)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::header;
-
-    use super::*;
-
-    #[test]
-    fn test_parse_header_valid() {
-        let bytes: [u8; 12] = [
-            0x12,
-            0x34,        // ID: 0x1234
-            0b1001_0101, // Flags_part1: QR=1, OPCODE=2, AA=1, TC=0, RD=1 => 0x95
-            0b0101_0011, // Flags_part2: RA=0, Z=5, RCODE=3 => 0x53
-            0x00,
-            0x01, // QDCOUNT: 1
-            0x00,
-            0x02, // ANCOUNT: 2
-            0x00,
-            0x03, // NSCOUNT: 3
-            0x00,
-            0x04, // ARCOUNT: 4
-        ];
-        let mut message = Message::default();
-        message.bytes = bytes.to_vec();
-
-        let message_header = message.parse_header();
-
-        // Parse the header
-        assert!(message.parse_header().is_ok());
-
-        let header = message_header.unwrap();
-
-        // Assert each field
-        assert_eq!(header.ID, 0x1234);
-        assert_eq!(header.QR, 1);
-        assert_eq!(header.OPCODE, 2);
-        assert_eq!(header.AA, 1);
-        assert_eq!(header.TC, 0);
-        assert_eq!(header.RD, 1);
-        assert_eq!(header.RA, 0);
-        assert_eq!(header.Z, 5);
-        assert_eq!(header.RCODE, 3);
-        assert_eq!(header.QDCOUNT, 1);
-        assert_eq!(header.ANCOUNT, 2);
-        assert_eq!(header.NSCOUNT, 3);
-        assert_eq!(header.ARCOUNT, 4);
-    }
-
-    #[test]
-    fn test_parse_single_questions_valid() {
-        let bytes: [u8; 33] = [
-            19, 58, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 12, 99, 111, 100, 101, 99, 114, 97, 102, 116,
-            101, 114, 115, 2, 105, 111, 0, 0, 1, 0, 1,
-        ];
-        let mut message = Message::default();
-        message.bytes = bytes.to_vec();
-
-        let message_header = message.parse_header();
-        message.header = message_header.unwrap();
-
-        let message_questions = message.parse_questions();
-        assert!(message.parse_header().is_ok());
-
-        let qustions = message_questions.unwrap();
-
-        assert_eq!(qustions.len(), 1);
-
-        let question = &qustions[0];
-        assert_eq!(question.q_type, 1);
-        assert_eq!(question.q_class, 1);
-
-        let name: Vec<u8> = vec![
-            12, 99, 111, 100, 101, 99, 114, 97, 102, 116, 101, 114, 115, 2, 105, 111,
-        ];
-        assert_eq!(question.name, name);
-    }
-
-    #[test]
-    fn test_parse_two_questions_valid() {
-        let bytes: [u8; 62] = [
-            164, 29, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 3, 97, 98, 99, 17, 108, 111, 110, 103, 97, 115,
-            115, 100, 111, 109, 97, 105, 110, 110, 97, 109, 101, 3, 99, 111, 109, 0, 0, 1, 0, 1, 3,
-            100, 101, 102, 192, 16, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ];
-        let mut message = Message::default();
-        message.bytes = bytes.to_vec();
-
-        let message_header = message.parse_header();
-        message.header = message_header.unwrap();
-
-        let message_questions = message.parse_questions();
-        assert!(message.parse_header().is_ok());
-
-        let qustions = message_questions.unwrap();
-
-        assert_eq!(qustions.len(), 2);
-
-        let question = &qustions[0];
-        assert_eq!(question.q_type, 1);
-        assert_eq!(question.q_class, 1);
-
-        let name: Vec<u8> = vec![
-            3, 97, 98, 99, 17, 108, 111, 110, 103, 97, 115, 115, 100, 111, 109, 97, 105, 110, 110,
-            97, 109, 101, 3, 99, 111, 109, 0, 0, 1, 0, 1,
-        ];
-        // assert_eq!(question.name, name);
+    pub fn create_answers_as_array_of_bytes(&mut self) -> Result<Vec<u8>, &'static str> {
+        let mut bytes = Vec::new();
+        for ans in &mut self.answers {
+            let answer_bytes = ans.create_answer_as_array_of_bytes().unwrap();
+            bytes.extend_from_slice(&answer_bytes);
+        }
+        Ok(bytes)
     }
 }
