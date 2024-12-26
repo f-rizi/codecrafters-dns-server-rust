@@ -48,7 +48,8 @@ async fn main() -> Result<(), DnsError> {
             }
         };
 
-        let packet = buf[..size].to_vec();
+        buf.truncate(size);
+        let packet: Box<[u8]> = buf.into_boxed_slice();
 
         // Spawn a task to handle the DNS request
         tokio::spawn(async move {
@@ -62,7 +63,7 @@ async fn main() -> Result<(), DnsError> {
 async fn handle_client(
     udp_socket: &Arc<UdpSocket>,
     redirect_address: &Arc<String>,
-    packet: Vec<u8>,
+    packet: Box<[u8]>,
     source: std::net::SocketAddr,
 ) -> Result<(), DnsError> {
     let mut client_message = Message::default();
