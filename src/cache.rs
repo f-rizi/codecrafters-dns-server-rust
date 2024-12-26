@@ -1,11 +1,8 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::dns::answer::Answer;
-use crate::errors::DnsError;
 use log::{info, warn};
-use once_cell::sync::Lazy;
 use tokio::sync::RwLock;
 
 type CacheKey = (Vec<u8>, u16, u16);
@@ -32,7 +29,6 @@ impl Cache {
                 return Some(answer.clone());
             } else {
                 warn!("Cache entry expired for key: {:?}", key);
-                //store.remove(key);
             }
         }
 
