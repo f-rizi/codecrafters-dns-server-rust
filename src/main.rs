@@ -1,3 +1,4 @@
+mod cache;
 mod dns;
 mod errors;
 mod traits;
@@ -6,13 +7,15 @@ use dns::answer::Answer;
 use futures::future::join_all;
 
 use rand::random;
-use traits::Serializable;
 use std::env;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::UdpSocket;
+use traits::Serializable;
 
 use crate::dns::message::Message;
 use crate::dns::question::Question;
+use cache::Cache;
 use errors::DnsError;
 
 #[tokio::main]
@@ -35,13 +38,15 @@ async fn main() -> Result<(), DnsError> {
     let udp_socket = Arc::new(udp_socket);
     let redirect_address = Arc::new(redirect_address);
 
+    let cache = Arc::new(Cache::new(Duration::from_secs(300)));
+
     loop {
         let udp_socket = Arc::clone(&udp_socket);
         let redirect_address = Arc::clone(&redirect_address);
+        let cache = Arc::clone(&cache);
 
         let mut buf = vec![0u8; 512];
 
-        // Receive data from client
         let (size, source) = match udp_socket.recv_from(&mut buf).await {
             Ok((size, src)) => (size, src),
             Err(e) => {
@@ -53,9 +58,10 @@ async fn main() -> Result<(), DnsError> {
         buf.truncate(size);
         let packet: Box<[u8]> = buf.into_boxed_slice();
 
-        // Spawn a task to handle the DNS request
         tokio::spawn(async move {
-            if let Err(e) = handle_client(&udp_socket, &redirect_address, packet, source).await {
+            if let Err(e) =
+                handle_client(&udp_socket, &redirect_address, packet, source, &cache).await
+            {
                 log::error!("Error handling client: {}", e);
             }
         });
@@ -67,6 +73,7 @@ async fn handle_client(
     redirect_address: &Arc<String>,
     packet: Box<[u8]>,
     source: std::net::SocketAddr,
+    cache: &Arc<Cache>,
 ) -> Result<(), DnsError> {
     let mut client_message = Message::default();
     if let Err(e) = client_message.parse_message(&packet) {
@@ -99,7 +106,32 @@ async fn handle_client(
             let resolver_socket = Arc::clone(&resolver_socket);
             let resolver_addr = resolver_addr.clone();
             let question_clone = question.clone();
-            async move { resolve_question(&question_clone, &resolver_socket, &resolver_addr).await }
+            let cache = Arc::clone(&cache);
+            async move {
+                let key = (
+                    question_clone.name.clone(),
+                    question_clone.q_type,
+                    question_clone.q_class,
+                );
+
+                match cache.get(&key).await {
+                    Some(answer) => {
+                        return Ok(answer);
+                    }
+                    None => {
+                        match resolve_question(&question_clone, &resolver_socket, &resolver_addr)
+                            .await
+                        {
+                            Ok(answer) => {
+                                let ttl = Duration::from_secs(answer.TTL as u64);
+                                cache.insert(key, answer.clone(), Some(ttl)).await;
+                                return Ok(answer);
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                }
+            }
         });
 
         let results = join_all(resolution_futures).await;
