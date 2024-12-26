@@ -1,6 +1,7 @@
-use std::result::Result;
-
 use crate::errors::DnsError;
+use crate::traits::Serializable;
+
+use std::result::Result;
 
 use super::{answer::Answer, header::Header, question::Question};
 
@@ -9,6 +10,29 @@ pub struct Message {
     pub header: Header,
     pub questions: Vec<Question>,
     pub answers: Vec<Answer>,
+}
+
+impl Serializable for Message {
+    fn serialize(&mut self) -> Result<Vec<u8>, DnsError> {
+        let header_bytes = self
+            .header
+            .serialize()
+            .map_err(|_| DnsError::Serialization("Failed to serialize header".to_string()))?;
+        let question_bytes = self
+            .serialize_questions()
+            .map_err(|_| DnsError::Serialization("Failed to serialize questions".to_string()))?;
+
+        let answer_bytes = self
+            .serialize_answers()
+            .map_err(|_| DnsError::Serialization("Failed to serialize answers".to_string()))?;
+
+        let mut combined = Vec::new();
+        combined.extend_from_slice(&header_bytes);
+        combined.extend_from_slice(&question_bytes);
+        combined.extend_from_slice(&answer_bytes);
+
+        Ok(combined)
+    }
 }
 
 impl Message {
@@ -25,27 +49,6 @@ impl Message {
         }
 
         Ok(())
-    }
-
-    pub fn create_response_bytes(&mut self) -> Result<Vec<u8>, DnsError> {
-        let header_bytes = self
-            .header
-            .create_header_as_array_of_bytes()
-            .map_err(|_| DnsError::Serialization("Failed to serialize header".to_string()))?;
-        let question_bytes = self
-            .create_questions_as_array_of_bytes()
-            .map_err(|_| DnsError::Serialization("Failed to serialize questions".to_string()))?;
-
-        let answer_bytes = self
-            .create_answers_as_array_of_bytes()
-            .map_err(|_| DnsError::Serialization("Failed to serialize answers".to_string()))?;
-
-        let mut combined = Vec::new();
-        combined.extend_from_slice(&header_bytes);
-        combined.extend_from_slice(&question_bytes);
-        combined.extend_from_slice(&answer_bytes);
-
-        Ok(combined)
     }
 
     pub fn parse_answers(&mut self) -> Result<Vec<Answer>, DnsError> {
@@ -243,19 +246,19 @@ impl Message {
         Ok((answer, offset))
     }
 
-    fn create_questions_as_array_of_bytes(&mut self) -> Result<Vec<u8>, DnsError> {
+    fn serialize_questions(&mut self) -> Result<Vec<u8>, DnsError> {
         let mut bytes = Vec::new();
         for q in &mut self.questions {
-            let question_bytes = q.create_question_as_array_of_bytes()?;
+            let question_bytes = q.serialize()?;
             bytes.extend_from_slice(&question_bytes);
         }
         Ok(bytes)
     }
 
-    fn create_answers_as_array_of_bytes(&mut self) -> Result<Vec<u8>, DnsError> {
+    fn serialize_answers(&mut self) -> Result<Vec<u8>, DnsError> {
         let mut bytes = Vec::new();
         for ans in &mut self.answers {
-            let answer_bytes = ans.create_answer_as_array_of_bytes()?;
+            let answer_bytes = ans.serialize()?;
             bytes.extend_from_slice(&answer_bytes);
         }
         Ok(bytes)

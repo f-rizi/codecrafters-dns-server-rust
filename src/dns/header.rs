@@ -1,4 +1,5 @@
 use crate::errors::DnsError;
+use crate::traits::Serializable;
 
 #[derive(Clone, Debug, Default)]
 pub struct Header {
@@ -17,9 +18,9 @@ pub struct Header {
     pub ARCOUNT: u16,
 }
 
-impl Header {
-    pub fn create_header_as_array_of_bytes(&mut self) -> Result<[u8; 12], DnsError> {
-        let mut bytes = [0u8; 12];
+impl Serializable for Header {
+    fn serialize(&mut self) -> Result<Vec<u8>, DnsError> {
+        let mut bytes: Vec<u8> = vec![0; 12];
 
         bytes[0] = self.ID.to_be_bytes()[0];
         bytes[1] = self.ID.to_be_bytes()[1];

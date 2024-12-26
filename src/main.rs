@@ -1,10 +1,12 @@
 mod dns;
 mod errors;
+mod traits;
 
 use dns::answer::Answer;
 use futures::future::join_all;
 
 use rand::random;
+use traits::Serializable;
 use std::env;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
@@ -84,7 +86,7 @@ async fn handle_client(
         client_message.header.ANCOUNT = client_message.header.QDCOUNT;
         client_message.answers = client_message.parse_answers()?;
 
-        let response_bytes = client_message.create_response_bytes()?;
+        let response_bytes = client_message.serialize()?;
 
         udp_socket.send_to(&response_bytes, source).await?;
     } else {
@@ -118,7 +120,7 @@ async fn handle_client(
         client_message.header.ANCOUNT = combined_answers.len() as u16;
         client_message.answers = combined_answers;
 
-        let response_bytes = client_message.create_response_bytes()?;
+        let response_bytes = client_message.serialize()?;
 
         udp_socket.send_to(&response_bytes, source).await?;
     }
@@ -144,7 +146,7 @@ async fn resolve_question(
     query_message.header.QDCOUNT = 1;
     query_message.questions.push(question.clone());
 
-    let query_bytes = query_message.create_response_bytes()?;
+    let query_bytes = query_message.serialize()?;
 
     resolver_socket.send_to(&query_bytes, resolver_addr).await?;
 
